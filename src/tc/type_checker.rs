@@ -1,14 +1,11 @@
 use std::collections::HashMap;
 
-use crate::ir::ast::Expression;
-use crate::ir::ast::Name;
-use crate::ir::ast::Type;
-
+use crate::ir::ast::{Expression, Name, Type, ValueConstructor};
 type ErrorMessage = String;
 
 type Environment = HashMap<Name, Type>;
 
-pub fn check(exp: Expression, env: &Environment) -> Result<Type, ErrorMessage> {
+pub fn check(exp: Expression, env: &Environment,) -> Result<Type, ErrorMessage> {
     match exp {
         Expression::CTrue => Ok(Type::TBool),
         Expression::CFalse => Ok(Type::TBool),
@@ -27,9 +24,30 @@ pub fn check(exp: Expression, env: &Environment) -> Result<Type, ErrorMessage> {
         Expression::LT(l, r) => check_bin_relational_expression(*l, *r, env),
         Expression::GTE(l, r) => check_bin_relational_expression(*l, *r, env),
         Expression::LTE(l, r) => check_bin_boolean_expression(*l, *r, env),
+        Expression::ADTConstructor(name, exprs) => check_adt_constructor(name, exprs, env),
         _ => Err(String::from("not implemented yet")),
     }
 }
+
+fn check_adt_constructor(name: Name, exprs: Vec<Box<Expression>>, env: &Environment) -> Result<Type, ErrorMessage> {
+    if let Some(Type::Tadt(_, value_constructors)) = env.get(&name) {
+        for constructor in value_constructors {
+            if constructor.types.len() == exprs.len() {
+                for (i, expr) in exprs.iter().enumerate() {
+                    let expr_type = check(*expr.clone(), env)?;
+                    if expr_type != constructor.types[i] {
+                        return Err(format!("Type mismatch in ADT constructor: expected {:?}, found {:?}", constructor.types[i], expr_type));
+                    }
+                }
+                return Ok(Type::Tadt(name.clone(), value_constructors.clone()));
+            }
+        }
+        Err(format!("Invalid ADT constructor usage for {}", name))
+    } else {
+        Err(format!("Unknown ADT: {}", name))
+    }
+}
+
 
 fn check_bin_arithmetic_expression(
     left: Expression,
@@ -87,6 +105,7 @@ fn check_bin_relational_expression(
         _ => Err(String::from("[Type Error] expecting numeric type values.")),
     }
 }
+
 
 #[cfg(test)]
 mod tests {
@@ -223,5 +242,77 @@ mod tests {
             check(or, &env),
             Err(String::from("[Type Error] expecting boolean type values."))
         );
+    }
+
+
+    fn setup_environment() -> Environment {
+    let mut env = Environment::new();
+    
+    // Define the ADT "Some" with a constructor that takes a single integer
+    let some_adt = vec![ValueConstructor {
+        name: "Some".to_string(),
+        types: vec![Type::TInteger], // Expected type for the constructor
+    }];
+    env.insert("Some".to_string(), Type::Tadt("Some".to_string(), some_adt));
+
+    // Define the ADT "Maybe" with a constructor that takes a real number and a string
+    let maybe_adt = vec![ValueConstructor {
+        name: "Maybe".to_string(),
+        types: vec![Type::TReal, Type::TString], // Expected types for the constructor
+    }];
+    env.insert("Maybe".to_string(), Type::Tadt("Maybe".to_string(), maybe_adt));
+
+    env
+}
+    
+    
+    #[test]
+    fn test_valid_adt_constructor() {
+        let env = setup_environment();
+        let exprs = vec![Box::new(Expression::CInt(10))]; // Argument type is TInteger
+        let adt_name = "Some".to_string();
+        let result = check_adt_constructor(adt_name, exprs, &env);
+        
+        assert_eq!(result, Ok(Type::Tadt("Some".to_string(), vec![
+            ValueConstructor { name: "Some".to_string(), types: vec![Type::TInteger] }
+        ])));
+    }
+    
+    
+    #[test]
+    fn test_invalid_adt_constructor_argument_count() {
+        let env = setup_environment();
+        let exprs = vec![Box::new(Expression::CInt(10)), Box::new(Expression::CString("Hello".to_string()))]; // Extra argument
+        let adt_name = "Some".to_string();
+        let result = check_adt_constructor(adt_name, exprs, &env);
+    
+        assert_eq!(result, Err("Invalid ADT constructor usage for Some".to_string()));
+    }
+    
+    
+    #[test]
+    fn test_invalid_adt_constructor_type_mismatch() {
+        let env = setup_environment();
+        let exprs = vec![Box::new(Expression::CString("Hello".to_string()))]; // Argument type should be TInteger
+        let adt_name = "Some".to_string();
+        let result = check_adt_constructor(adt_name, exprs, &env);
+    
+        assert_eq!(result, Err("Type mismatch in ADT constructor: expected TInteger, found TString".to_string()));
+    }
+    
+    
+    #[test]
+    fn test_valid_adt_constructor_with_arguments() {
+        let env = setup_environment();
+        let exprs: Vec<Box<Expression>> = vec![
+            Box::new(Expression::CReal(3.14)), // First argument: TReal
+            Box::new(Expression::CString("Hello".to_string())), // Second argument: TString
+        ];
+        let adt_name = "Maybe".to_string();
+        let result = check_adt_constructor(adt_name, exprs, &env);
+
+        assert_eq!(result, Ok(Type::Tadt("Maybe".to_string(), vec![
+            ValueConstructor { name: "Maybe".to_string(), types: vec![Type::TReal, Type::TString] }
+        ])));
     }
 }
