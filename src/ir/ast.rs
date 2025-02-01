@@ -19,6 +19,22 @@ pub struct  ValueConstructor{
 
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum Pattern{
+    PConstant(Expression),
+    PVariable(Name),
+    PADT(Name, Vec<Pattern>),
+    PTuple(Vec<Pattern>),
+    CTuple(Vec<Box<Expression>>),
+    PWildcard // for example the underscore for python pattern match
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct MatchCase{
+    pub pattern:  Pattern,
+    pub body: Box<Statement>
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum Expression {
     /* constants */
     CTrue,
@@ -51,6 +67,7 @@ pub enum Expression {
 
     /* ADT Constructor */
     ADTConstructor(Name, Vec<Box<Expression>>),
+    CTuple(Vec<Box<Expression>>), // Represents a tuple expression
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -62,4 +79,5 @@ pub enum Statement {
     While(Box<Expression>, Box<Statement>),
     Sequence(Box<Statement>, Box<Statement>), 
     ADTDeclaration(Name, Vec<ValueConstructor>),
+    Match(Box<Expression>, Vec<MatchCase>),
 }
