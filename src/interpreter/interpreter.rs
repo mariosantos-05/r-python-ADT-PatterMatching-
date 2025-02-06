@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ir::ast::{Expression, Name, Statement, ValueConstructor};
+use crate::ir::ast::{Expression, Name, Statement, ValueConstructor, Pattern, MatchCase};
 
 type ErrorMessage = String;
 
@@ -29,7 +29,6 @@ pub fn eval(exp: Expression, env: &Environment, type_env: &TypeEnvironment) -> R
         _ => Err(String::from("Not implemented yet.")),
     }
 }
-
 
 fn constructor_eval(
     name: Name, 
@@ -378,16 +377,91 @@ pub fn execute(
             type_env.insert(name, constructors);
             Ok(env.clone())  // Return the updated environment (no changes made here, but you can return the same env)
         }
+
+        // Match statement
+        Statement::Match(scrutinee, cases) => {
+            let value = eval(*scrutinee, env, type_env)?;
+            for case in cases {
+                let mut bindings = HashMap::new();
+                if match_pattern(&value, &case.pattern, env, type_env, &mut bindings).is_ok() {
+                    env.extend(bindings);
+                    return execute(*case.body, env, type_env);
+                }
+            }
+            Err("No case matched".to_string())
+        }
         _ => Err(String::from("Statement not implemented yet")),
     }
 }
 
 
+pub fn match_pattern(
+    value: &Expression,
+    pattern: &Pattern,
+    env: &Environment,
+    type_env: &TypeEnvironment,
+    bindings: &mut HashMap<String, Expression>,
+) -> Result<(), ErrorMessage> {
+    match pattern {
+
+        Pattern::PConstant(exp) => {
+            let evaluated_exp = eval(exp.clone(), env, type_env)?;
+            if evaluated_exp == *value {
+                Ok(())
+            } else {
+                Err("Constant pattern mismatch".to_string())
+            }
+        }
+
+
+        Pattern::PVariable(name) => {
+            bindings.insert(name.clone(), value.clone());
+            Ok(())
+        }
+
+
+        Pattern::PADT(pat_name, pat_args) => {
+            if let Expression::ADTConstructor(val_name, val_args) = value {
+                if pat_name != val_name {
+                    return Err(format!("Expected constructor {}, found {}", pat_name, val_name));
+                }
+                for (arg_val, arg_pat) in val_args.iter().zip(pat_args) {
+                    match_pattern(arg_val, arg_pat, env, type_env, bindings)?;
+                }
+                Ok(())
+            } else {
+                Err("Value is not an ADT constructor".to_string())
+            }
+        }
+
+
+        Pattern::PWildcard => Ok(()),
+
+
+        Pattern::PTuple(patterns) => {
+            if let Expression::CTuple(values) = value {
+                if patterns.len() != values.len() {
+                    return Err("Tuple length mismatch".to_string());
+                }
+                for (val, pat) in values.iter().zip(patterns) {
+                    match_pattern(val, pat, env, type_env, bindings)?;
+                }
+                Ok(())
+            } else {
+                Err("Value is not a tuple".to_string())
+            }
+        }
+
+
+        _ => Err("Pattern not implemented yet".to_string()),
+    }
+}
 
 #[cfg(test)]
 mod tests {
 
     use std::vec;
+    
 
     use super::*;
     use crate::ir::ast::Expression::*;
@@ -1279,8 +1353,145 @@ mod tests {
     }
 
 
+        // Test 1: Matching a constant pattern
+    #[test]
+    fn test_constant_pattern() {
+        let env = Environment::new();
+        let type_env = TypeEnvironment::new();
+        let value = Expression::CInt(42);
+        let pattern = Pattern::PConstant(Expression::CInt(42));
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_ok());
+        assert!(bindings.is_empty()); // No bindings for constant patterns
+    }
 
+    // Test 2: Matching a variable pattern
+    #[test]
+    fn test_variable_pattern() {
+        let env = Environment::new();
+        let type_env = TypeEnvironment::new();
+        let value = Expression::CInt(42);
+        let pattern = Pattern::PVariable("x".to_string());
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_ok());
+        assert_eq!(bindings.get("x"), Some(&Expression::CInt(42))); // Binding should be created
+    }
+
+    // Test 3: Matching a wildcard pattern
+    #[test]
+    fn test_wildcard_pattern() {
+        let env = Environment::new();
+        let type_env = TypeEnvironment::new();
+        let value = Expression::CInt(42);
+        let pattern = Pattern::PWildcard;
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_ok());
+        assert!(bindings.is_empty()); // No bindings for wildcard patterns
+    }
+
+    // Test 4: Matching a tuple pattern
+    #[test]
+    fn test_tuple_pattern() {
+        let env = Environment::new();
+        let type_env = TypeEnvironment::new();
+        let value = Expression::CTuple(vec![
+            Box::new(Expression::CInt(1)),
+            Box::new(Expression::CTrue),
+            Box::new(Expression::CString("hello".to_string())),
+        ]);
+        let pattern = Pattern::PTuple(vec![
+            Pattern::PConstant(Expression::CInt(1)),
+            Pattern::PVariable("flag".to_string()),
+            Pattern::PVariable("message".to_string()),
+        ]);
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_ok());
+        assert_eq!(bindings.get("flag"), Some(&Expression::CTrue));
+        assert_eq!(bindings.get("message"), Some(&Expression::CString("hello".to_string())));
+    }
+
+    // Test 5: Matching an ADT pattern
+    #[test]
+    fn test_adt_pattern() {
+        let env = Environment::new();
+        let type_env = TypeEnvironment::new();
+        let value = Expression::ADTConstructor(
+            "Some".to_string(),
+            vec![Box::new(Expression::CInt(42))],
+        );
+        let pattern = Pattern::PADT(
+            "Some".to_string(),
+            vec![Pattern::PVariable("value".to_string())],
+        );
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_ok());
+        assert_eq!(bindings.get("value"), Some(&Expression::CInt(42)));
+    }
+
+    // Test 6: Mismatched pattern (should fail)
+    #[test]
+    fn test_mismatched_pattern() {
+        let env = Environment::new();
+        let type_env = TypeEnvironment::new();
+        let value = Expression::CInt(42);
+        let pattern = Pattern::PConstant(Expression::CInt(100));
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_err());
+    }
+
+    // Test 7: Mismatched tuple length (should fail)
+    #[test]
+    fn test_mismatched_tuple_length() {
+        let env = Environment::new();
+        let type_env = TypeEnvironment::new();
+        let value = Expression::CTuple(vec![
+            Box::new(Expression::CInt(1)),
+            Box::new(Expression::CTrue),
+        ]);
+        let pattern = Pattern::PTuple(vec![
+            Pattern::PConstant(Expression::CInt(1)),
+            Pattern::PVariable("flag".to_string()),
+            Pattern::PVariable("message".to_string()),
+        ]);
+        let mut bindings = HashMap::new();
+        assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_err());
+    }
+
+    // Test 8: Execute a match statement
+    #[test]
+    fn test_execute_match_statement() {
+        let mut env = Environment::new();
+        let mut type_env = TypeEnvironment::new();
+        let match_stmt = Statement::Match(
+            Box::new(Expression::CTuple(vec![
+                Box::new(Expression::CInt(1)),
+                Box::new(Expression::CTrue),
+                Box::new(Expression::CString("hello".to_string())),
+            ])),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PTuple(vec![
+                        Pattern::PConstant(Expression::CInt(1)),
+                        Pattern::PVariable("flag".to_string()),
+                        Pattern::PVariable("message".to_string()),
+                    ]),
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::Var("message".to_string())),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PWildcard,
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("default".to_string())),
+                    )),
+                },
+            ],
+        );
+        let result = execute(match_stmt, &mut env, &mut type_env);
+        assert!(result.is_ok());
+        assert_eq!(env.get("result"), Some(&Expression::CString("hello".to_string())));
+    }
 }
-
-
 
