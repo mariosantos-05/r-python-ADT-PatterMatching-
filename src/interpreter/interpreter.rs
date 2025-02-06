@@ -1501,5 +1501,408 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(env.get("result"), Some(&Expression::CString("hello".to_string())));
     }
+
+    #[test]
+    fn test_adt_pattern_matching() {
+        use crate::ir::ast::MatchCase;
+        let mut env = Environment::new();
+        let mut type_env = TypeEnvironment::new();
+
+        // Define an ADT (similar to Python's Option)
+        type_env.insert(
+            "Option".to_string(),
+            vec![
+                ValueConstructor {
+                    name: "Some".to_string(),
+                    types: vec![Type::TInteger],
+                },
+                ValueConstructor {
+                    name: "None".to_string(),
+                    types: vec![],
+                },
+            ],
+        );
+
+        // Simulate an ADT value
+        let value = Expression::ADTConstructor(
+            "Some".to_string(),
+            vec![Box::new(Expression::CInt(42))],
+        );
+
+        // Simulate the match statement
+        let match_stmt = Statement::Match(
+            Box::new(value),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PADT(
+                        "Some".to_string(),
+                        vec![Pattern::PVariable("x".to_string())],
+                    ),
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::Var("x".to_string())),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PADT("None".to_string(), vec![]),
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("default".to_string())),
+                    )),
+                },
+            ],
+        );
+
+        // Execute the match statement
+        let result = execute(match_stmt, &mut env, &mut type_env);
+        assert!(result.is_ok());
+        assert_eq!(env.get("result"), Some(&Expression::CInt(42)));
+    }
+
+    #[test]
+    fn test_adt_geometric_shapes2() {
+        use crate::ir::ast::{Type, MatchCase, Pattern, Statement, Expression, ValueConstructor};
+
+
+        let mut env = Environment::new();
+        let mut type_env = TypeEnvironment::new();
+
+        // Declare the Shape ADT
+        let stmt = Statement::ADTDeclaration(
+            "Shape".to_string(),
+            vec![
+                ValueConstructor {
+                    name: "Circle".to_string(),
+                    types: vec![Type::TInteger],
+                },
+                ValueConstructor {
+                    name: "Rectangle".to_string(),
+                    types: vec![Type::TInteger, Type::TInteger],
+                },
+                ValueConstructor {
+                    name: "Triangle".to_string(),
+                    types: vec![Type::TInteger, Type::TInteger],
+                },
+            ],
+        );
+
+        // Execute the ADT declaration
+        let result = execute(stmt, &mut env, &mut type_env);
+        assert!(result.is_ok());
+        assert!(type_env.contains_key("Shape"));
+        assert_eq!(type_env.get("Shape").unwrap().len(), 3);
+
+        // Test Circle(10)
+        let expr_circle = Expression::ADTConstructor(
+            "Circle".to_string(),
+            vec![Box::new(Expression::CInt(10))],
+        );
+        let eval_circle = eval(expr_circle.clone(), &env, &type_env);
+        assert_eq!(eval_circle, Ok(expr_circle.clone()));
+
+        // Test Rectangle(4, 5)
+        let expr_rectangle = Expression::ADTConstructor(
+            "Rectangle".to_string(),
+            vec![
+                Box::new(Expression::CInt(4)),
+                Box::new(Expression::CInt(5)),
+            ],
+        );
+        let eval_rectangle = eval(expr_rectangle.clone(), &env, &type_env);
+        assert_eq!(eval_rectangle, Ok(expr_rectangle.clone()));
+
+        // Test Triangle(3, 6)
+        let expr_triangle = Expression::ADTConstructor(
+            "Triangle".to_string(),
+            vec![
+                Box::new(Expression::CInt(3)),
+                Box::new(Expression::CInt(6)),
+            ],
+        );
+        let eval_triangle = eval(expr_triangle.clone(), &env, &type_env);
+        assert_eq!(eval_triangle, Ok(expr_triangle.clone()));
+
+        // Test pattern matching for Circle
+        let match_stmt_circle = Statement::Match(
+            Box::new(expr_circle.clone()),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PADT(
+                        "Circle".to_string(),
+                        vec![Pattern::PVariable("radius".to_string())],
+                    ),
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::Var("radius".to_string())),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PWildcard,
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("unknown shape".to_string())),
+                    )),
+                },
+            ],
+        );
+        let result_circle = execute(match_stmt_circle, &mut env, &mut type_env);
+        assert!(result_circle.is_ok());
+        assert_eq!(env.get("result"), Some(&Expression::CInt(10)));
+
+        // Test pattern matching for Rectangle
+        let match_stmt_rectangle = Statement::Match(
+            Box::new(expr_rectangle.clone()),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PADT(
+                        "Rectangle".to_string(),
+                        vec![
+                            Pattern::PVariable("width".to_string()),
+                            Pattern::PVariable("height".to_string()),
+                        ],
+                    ),
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::Add(
+                            Box::new(Expression::Var("width".to_string())),
+                            Box::new(Expression::Var("height".to_string())),
+                        )),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PWildcard,
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("unknown shape".to_string())),
+                    )),
+                },
+            ],
+        );
+        let result_rectangle = execute(match_stmt_rectangle, &mut env, &mut type_env);
+        assert!(result_rectangle.is_ok());
+        assert_eq!(env.get("result"), Some(&Expression::CInt(9))); // 4 + 5 = 9
+
+        // Test pattern matching for Triangle
+        let match_stmt_triangle = Statement::Match(
+            Box::new(expr_triangle.clone()),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PADT(
+                        "Triangle".to_string(),
+                        vec![
+                            Pattern::PVariable("base".to_string()),
+                            Pattern::PVariable("height".to_string()),
+                        ],
+                    ),
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::Mul(
+                            Box::new(Expression::Var("base".to_string())),
+                            Box::new(Expression::Var("height".to_string())),
+                        )),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PWildcard,
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("unknown shape".to_string())),
+                    )),
+                },
+            ],
+        );
+        let result_triangle = execute(match_stmt_triangle, &mut env, &mut type_env);
+        assert!(result_triangle.is_ok());
+        assert_eq!(env.get("result"), Some(&Expression::CInt(18))); // 3 * 6 = 18
+    }
+
+    #[test]
+    fn test_calculate_area_or_perimeter() {
+        use crate::ir::ast::{Type, MatchCase, Pattern, Statement, Expression, ValueConstructor};
+    
+    
+        let mut env = Environment::new();
+        let mut type_env = TypeEnvironment::new();
+    
+        // Declare the Shape ADT
+        let stmt = Statement::ADTDeclaration(
+            "Shape".to_string(),
+            vec![
+                ValueConstructor {
+                    name: "Rectangle".to_string(),
+                    types: vec![Type::TInteger, Type::TInteger], // width, height
+                },
+                ValueConstructor {
+                    name: "Square".to_string(),
+                    types: vec![Type::TInteger], // side
+                },
+                ValueConstructor {
+                    name: "Circle".to_string(),
+                    types: vec![Type::TInteger], // radius
+                },
+            ],
+        );
+    
+        // Execute the ADT declaration
+        let result = execute(stmt, &mut env, &mut type_env);
+        assert!(result.is_ok());
+        assert!(type_env.contains_key("Shape"));
+        assert_eq!(type_env.get("Shape").unwrap().len(), 3);
+    
+        // Test Rectangle(4, 5)
+        let expr_rectangle = Expression::ADTConstructor(
+            "Rectangle".to_string(),
+            vec![
+                Box::new(Expression::CInt(4)),
+                Box::new(Expression::CInt(5)),
+            ],
+        );
+        let match_stmt_rectangle = Statement::Match(
+            Box::new(expr_rectangle.clone()),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PADT(
+                        "Rectangle".to_string(),
+                        vec![
+                            Pattern::PVariable("width".to_string()),
+                            Pattern::PVariable("height".to_string()),
+                        ],
+                    ),
+                    body: Box::new(Statement::Sequence(
+                        Box::new(Statement::Assignment(
+                            "area".to_string(),
+                            Box::new(Expression::Mul(
+                                Box::new(Expression::Var("width".to_string())),
+                                Box::new(Expression::Var("height".to_string())),
+                            )),
+                        )),
+                        Box::new(Statement::Assignment(
+                            "perimeter".to_string(),
+                            Box::new(Expression::Mul(
+                                Box::new(Expression::CInt(2)),
+                                Box::new(Expression::Add(
+                                    Box::new(Expression::Var("width".to_string())),
+                                    Box::new(Expression::Var("height".to_string())),
+                                )),
+                            )),
+                        )),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PWildcard,
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("Unknown shape".to_string())),
+                    )),
+                },
+            ],
+        );
+        let result_rectangle = execute(match_stmt_rectangle, &mut env, &mut type_env);
+        assert!(result_rectangle.is_ok());
+        assert_eq!(env.get("area"), Some(&Expression::CInt(20))); // 4 * 5 = 20
+        assert_eq!(env.get("perimeter"), Some(&Expression::CInt(18))); // 2 * (4 + 5) = 18
+    
+        // Test Square(6)
+        let expr_square = Expression::ADTConstructor(
+            "Square".to_string(),
+            vec![Box::new(Expression::CInt(6))],
+        );
+        let match_stmt_square = Statement::Match(
+            Box::new(expr_square.clone()),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PADT(
+                        "Square".to_string(),
+                        vec![Pattern::PVariable("side".to_string())],
+                    ),
+                    body: Box::new(Statement::Sequence(
+                        Box::new(Statement::Assignment(
+                            "area".to_string(),
+                            Box::new(Expression::Mul(
+                                Box::new(Expression::Var("side".to_string())),
+                                Box::new(Expression::Var("side".to_string())),
+                            )),
+                        )),
+                        Box::new(Statement::Assignment(
+                            "perimeter".to_string(),
+                            Box::new(Expression::Mul(
+                                Box::new(Expression::CInt(4)),
+                                Box::new(Expression::Var("side".to_string())),
+                            )),
+                        )),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PWildcard,
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("Unknown shape".to_string())),
+                    )),
+                },
+            ],
+        );
+        let result_square = execute(match_stmt_square, &mut env, &mut type_env);
+        assert!(result_square.is_ok());
+        assert_eq!(env.get("area"), Some(&Expression::CInt(36))); // 6 * 6 = 36
+        assert_eq!(env.get("perimeter"), Some(&Expression::CInt(24))); // 4 * 6 = 24
+    
+        // Test Circle(3)
+        let expr_circle = Expression::ADTConstructor(
+            "Circle".to_string(),
+            vec![Box::new(Expression::CInt(3))],
+        );
+        let match_stmt_circle = Statement::Match(
+            Box::new(expr_circle.clone()),
+            vec![
+                MatchCase {
+                    pattern: Pattern::PADT(
+                        "Circle".to_string(),
+                        vec![Pattern::PVariable("radius".to_string())],
+                    ),
+                    body: Box::new(Statement::Sequence(
+                        Box::new(Statement::Assignment(
+                            "area".to_string(),
+                            Box::new(Expression::Mul(
+                                Box::new(Expression::Var("radius".to_string())),
+                                Box::new(Expression::Mul(
+                                    Box::new(Expression::Var("radius".to_string())),
+                                    Box::new(Expression::CReal(std::f64::consts::PI)),
+                                )),
+                            )),
+                        )),
+                        Box::new(Statement::Assignment(
+                            "circumference".to_string(),
+                            Box::new(Expression::Mul(
+                                Box::new(Expression::CInt(2)),
+                                Box::new(Expression::Mul(
+                                    Box::new(Expression::Var("radius".to_string())),
+                                    Box::new(Expression::CReal(std::f64::consts::PI)),
+                                )),
+                            )),
+                        )),
+                    )),
+                },
+                MatchCase {
+                    pattern: Pattern::PWildcard,
+                    body: Box::new(Statement::Assignment(
+                        "result".to_string(),
+                        Box::new(Expression::CString("Unknown shape".to_string())),
+                    )),
+                },
+            ],
+        );
+        let result_circle = execute(match_stmt_circle, &mut env, &mut type_env);
+        assert!(result_circle.is_ok());
+        assert_eq!(
+            env.get("area"),
+            Some(&Expression::CReal(28.274333882308138)) // π * 3² ≈ 28.27
+        );
+        assert_eq!(
+            env.get("circumference"),
+            Some(&Expression::CReal(18.84955592153876)) // 2 * π * 3 ≈ 18.85
+        );
+    }
+
+
 }
 
