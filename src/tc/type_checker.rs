@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ir::ast::{Expression, Name, Type, ValueConstructor};
+use crate::ir::ast::{Expression, Name, Type};
 type ErrorMessage = String;
 
 type Environment = HashMap<Name, Type>;
@@ -113,6 +113,8 @@ mod tests {
 
     use crate::ir::ast::Expression::*;
     use crate::ir::ast::Type::*;
+    use crate::ir::ast::ValueConstructor;
+
 
     #[test]
     fn check_tlist_comparison() {
