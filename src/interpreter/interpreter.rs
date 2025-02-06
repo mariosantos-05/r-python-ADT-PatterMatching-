@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::ir::ast::{Expression, Name, Statement, ValueConstructor, Pattern, MatchCase};
+use crate::ir::ast::{Expression, Name, Statement, ValueConstructor, Pattern};
 
 type ErrorMessage = String;
 
@@ -25,11 +25,23 @@ pub fn eval(exp: Expression, env: &Environment, type_env: &TypeEnvironment) -> R
         Expression::LTE(lhs, rhs) => lte(*lhs, *rhs, env, type_env),
         Expression::Var(name) => lookup(name, env),
         Expression::ADTConstructor(name, args) => constructor_eval(name, args, env, type_env),
+        Expression::CTuple(elements) => eval_ctuple(elements, env, type_env),
         _ if is_constant(exp.clone()) => Ok(exp),
         _ => Err(String::from("Not implemented yet.")),
     }
 }
 
+fn eval_ctuple(
+    elements: Vec<Box<Expression>>,
+    env: &Environment,
+    type_env: &TypeEnvironment,
+) -> Result<Expression, ErrorMessage> {
+    let evaluated_elements: Result<Vec<Box<Expression>>, ErrorMessage> = elements
+        .into_iter()
+        .map(|element| eval(*element, env, type_env).map(Box::new))
+        .collect();
+    evaluated_elements.map(Expression::CTuple)
+}
 fn constructor_eval(
     name: Name, 
     args: Vec<Box<Expression>>, 
@@ -413,7 +425,6 @@ pub fn match_pattern(
             }
         }
 
-
         Pattern::PVariable(name) => {
             bindings.insert(name.clone(), value.clone());
             Ok(())
@@ -459,10 +470,6 @@ pub fn match_pattern(
 
 #[cfg(test)]
 mod tests {
-
-    use std::vec;
-    
-
     use super::*;
     use crate::ir::ast::Expression::*;
     use crate::ir::ast::Statement::*;
@@ -1457,9 +1464,10 @@ mod tests {
         assert!(match_pattern(&value, &pattern, &env, &type_env, &mut bindings).is_err());
     }
 
-    // Test 8: Execute a match statement
     #[test]
     fn test_execute_match_statement() {
+
+        use crate::ir::ast::MatchCase;
         let mut env = Environment::new();
         let mut type_env = TypeEnvironment::new();
         let match_stmt = Statement::Match(
